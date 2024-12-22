@@ -2,6 +2,11 @@
 name = "zerolog"
 version = "0.1.0"
 edition = "2021"
+authors = ["Patrick Lorio <patrick@methods.dev>"]
+description = "Simple low overhead easy to disable logging"
+repository = "https://github.com/Developed-Methods/zerolog"
+license = "BSD-2-Clause"
+license-file = "LICENSE.txt"
 
 [dependencies]
 serde = { version = "1", features = [ "derive" ] }
