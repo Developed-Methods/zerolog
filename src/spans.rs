@@ -164,12 +164,14 @@ impl Drop for Span {
                 \"type\":\"exit\",\
                 \"span\":{:?},\
                 \"parent\":{:?},\
+                \"name\":{:?},\
                 \"depth\":{:?},\
                 \"duration_us\":{:?}\
                 }}",
                 Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
                 self.id,
                 self.parent_id,
+                self.name,
                 self.depth,
                 duration.as_micros(),
             );
