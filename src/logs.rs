@@ -1,9 +1,9 @@
-use std::panic::Location;
+use std::{mem::ManuallyDrop, panic::Location};
 
 use chrono::{DateTime, Utc};
 use serde::Serialize;
 
-use crate::{log_attr::LogAttr, LogLevel, spans::SPAN_STACK};
+use crate::{log_attr::LogAttr, spans::SPAN_STACK, trim_fn_path, trim_src_path, LogLevel};
 
 pub struct Log<A: LogAttr> {
     time: DateTime<Utc>,
@@ -24,12 +24,12 @@ impl Log<()> {
 
         Log {
             time: Utc::now(),
-            span: span.id,
+            span: span.last_print_id,
             level,
             msg,
             caller,
             caller_fn: None,
-            print: span.do_print,
+            print: span.min_level.map(|min| min <= level).unwrap_or(false),
             attrs: Some(()),
         }
     }
@@ -37,7 +37,7 @@ impl Log<()> {
 
 impl<A: LogAttr> Log<A> {
     pub fn attr<T: Serialize>(mut self, name: &'static str, value: T) -> Log<impl LogAttr> {
-        Log {
+        let log = Log {
             time: self.time,
             span: self.span,
             level: self.level,
@@ -46,15 +46,18 @@ impl<A: LogAttr> Log<A> {
             caller_fn: self.caller_fn,
             print: self.print,
             attrs: self.attrs.take().map(|a| a.add_attr(name, value)),
-        }
+        };
+
+        let _ = ManuallyDrop::new(self);
+        log
     }
 }
 
 impl<A: LogAttr> Drop for Log<A> {
     fn drop(&mut self) {
         println!("{{\
-            \"ts\":{:?},\
-            \"type\":\"log\",\
+            \"timestamp\":{:?},\
+            \"type\":\"logs\",\
             \"span\":{:?},\
             \"level\":\"{}\",\
             \"msg\":{:?},\
@@ -66,8 +69,8 @@ impl<A: LogAttr> Drop for Log<A> {
             self.span,
             self.level,
             self.msg,
-            self.caller.file(), self.caller.line(),
-            self.caller_fn.unwrap_or(""),
+            trim_src_path(self.caller.file()), self.caller.line(),
+            trim_fn_path(self.caller_fn.unwrap_or("")),
             serde_json::to_string(&self.attrs.take()).unwrap(),
         );
     }

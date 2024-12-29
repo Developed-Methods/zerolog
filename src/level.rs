@@ -2,7 +2,7 @@ use std::{fmt::Display, str::FromStr};
 
 use serde::{de::Visitor, Deserialize, Serialize};
 
-#[derive(PartialEq, Eq, Serialize, Clone, Copy, Debug)]
+#[derive(PartialEq, Eq, Serialize, Clone, Copy, Debug, PartialOrd, Ord)]
 pub enum LogLevel {
     Trace,
     Debug,

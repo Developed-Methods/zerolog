@@ -2,14 +2,15 @@ use std::{cell::RefCell, panic::Location, sync::atomic::{AtomicU64, Ordering}, t
 use chrono::Utc;
 use serde::Serialize;
 
-use crate::{level::LogLevel, log_attr::LogAttr};
+use crate::{level::LogLevel, log_attr::LogAttr, trim_fn_path, trim_src_path};
 
 static SPAN_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct StackEntry {
     pub id: u64,
-    pub do_print: bool,
+    pub last_print_id: u64,
+    pub min_level: Option<LogLevel>,
 }
 
 thread_local! {
@@ -17,15 +18,22 @@ thread_local! {
         let mut vec = Vec::with_capacity(32);
         vec.push(StackEntry {
             id: 0,
-            do_print: true,
+            last_print_id: 0,
+            min_level: Some(LogLevel::Trace),
         });
         vec
     });
 }
 
-pub fn print_logging(enabled: bool) {
+pub fn set_min_log_level(level: LogLevel) {
     SPAN_STACK.with_borrow_mut(|s| {
-        s.last_mut().unwrap().do_print = enabled;
+        s.last_mut().unwrap().min_level = Some(level);
+    });
+}
+
+pub fn disable_logging() {
+    SPAN_STACK.with_borrow_mut(|s| {
+        s.last_mut().unwrap().min_level = None;
     });
 }
 
@@ -87,20 +95,23 @@ impl<A: LogAttr> SpanBuilder<A> {
         let (parent_id, depth, printed) = SPAN_STACK.with_borrow_mut(|stack| {
             let depth = stack.len();
             let last = *stack.last().unwrap();
+            let printed = last.min_level.map(|min| min <= self.level).unwrap_or(false);
+            let last_print_id = if printed { id } else { last.last_print_id };
 
             stack.push(StackEntry {
                 id,
-                do_print: last.do_print,
+                last_print_id,
+                min_level: last.min_level,
             });
 
-            (last.id, depth as u64, last.do_print)
+            (last.last_print_id, depth as u64, printed)
         });
 
         if printed {
             println!("{{\
-                \"ts\":{:?},\
+                \"timestamp\":{:?},\
                 \"type\":\"span\",\
-                \"id\":{:?},\
+                \"span\":{:?},\
                 \"parent\":{:?},\
                 \"depth\":{:?},\
                 \"level\":\"{}\",\
@@ -115,8 +126,8 @@ impl<A: LogAttr> SpanBuilder<A> {
                 depth,
                 self.level,
                 self.name,
-                self.caller.file(), self.caller.line(),
-                self.caller_fn.unwrap_or(""),
+                trim_src_path(self.caller.file()), self.caller.line(),
+                trim_fn_path(self.caller_fn.unwrap_or("")),
                 serde_json::to_string(&self.attrs).unwrap(),
             );
         }
@@ -141,7 +152,7 @@ impl Drop for Span {
         SPAN_STACK.with_borrow_mut(|stack| {
             let tail = stack.pop().unwrap();
             assert_eq!(tail.id, self.id);
-            assert_eq!(stack.last().unwrap().id, self.parent_id);
+            assert_eq!(stack.last().unwrap().last_print_id, self.parent_id);
             assert_eq!(stack.len(), self.depth as usize);
         });
 
@@ -149,9 +160,9 @@ impl Drop for Span {
             let duration = self.time.elapsed();
 
             println!("{{\
-                \"ts\":{:?},\
+                \"timestamp\":{:?},\
                 \"type\":\"exit\",\
-                \"id\":{:?},\
+                \"span\":{:?},\
                 \"parent\":{:?},\
                 \"depth\":{:?},\
                 \"duration_us\":{:?}\
