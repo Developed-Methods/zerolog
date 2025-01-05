@@ -55,6 +55,10 @@ impl<A: LogAttr> Log<A> {
 
 impl<A: LogAttr> Drop for Log<A> {
     fn drop(&mut self) {
+        if !self.print {
+            return;
+        }
+
         println!("{{\
             \"timestamp\":{:?},\
             \"type\":\"logs\",\
