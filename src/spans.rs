@@ -11,6 +11,9 @@ pub(crate) struct StackEntry {
     pub id: u64,
     pub last_print_id: u64,
     pub min_level: Option<LogLevel>,
+    pub caller_file: &'static str,
+    pub caller_line: u32,
+    pub name: &'static str,
 }
 
 thread_local! {
@@ -20,6 +23,9 @@ thread_local! {
             id: 0,
             last_print_id: 0,
             min_level: Some(LogLevel::Trace),
+            caller_file: "",
+            caller_line: 0,
+            name: "",
         });
         vec
     });
@@ -35,6 +41,61 @@ pub fn disable_logging() {
     SPAN_STACK.with_borrow_mut(|s| {
         s.last_mut().unwrap().min_level = None;
     });
+}
+
+/// Prints the current span stack trace to both stdout (JSON) and stderr (human-readable).
+/// Useful for debugging panics or understanding the current execution context.
+pub fn print_span_trace() {
+    SPAN_STACK.with_borrow(|stack| {
+        // Skip the root entry (index 0) which is a placeholder
+        let spans: Vec<_> = stack.iter().skip(1).collect();
+        
+        if spans.is_empty() {
+            return;
+        }
+
+        // Print JSON to stdout
+        let json_spans: Vec<String> = spans.iter().map(|entry| {
+            format!(
+                "{{\"id\":{},\"file\":{:?},\"line\":{},\"name\":{:?}}}",
+                entry.id,
+                trim_src_path(entry.caller_file),
+                entry.caller_line,
+                entry.name
+            )
+        }).collect();
+        
+        println!("{{\
+            \"timestamp\":{:?},\
+            \"type\":\"panic_trace\",\
+            \"spans\":[{}]\
+            }}",
+            Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true),
+            json_spans.join(",")
+        );
+
+        // Print human-readable to stderr
+        eprintln!("Span trace (most recent last):");
+        for (idx, entry) in spans.iter().enumerate() {
+            eprintln!(
+                "  {}: {}:{} - {:?}",
+                idx,
+                trim_src_path(entry.caller_file),
+                entry.caller_line,
+                entry.name
+            );
+        }
+    });
+}
+
+/// Installs a panic hook that prints the span trace before the default panic output.
+/// Call this once at the start of your program to enable span trace on panics.
+pub fn install_panic_hook() {
+    let default_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        print_span_trace();
+        default_hook(info);
+    }));
 }
 
 pub struct SpanBuilder<A: LogAttr> {
@@ -102,6 +163,9 @@ impl<A: LogAttr> SpanBuilder<A> {
                 id,
                 last_print_id,
                 min_level: last.min_level,
+                caller_file: self.caller.file(),
+                caller_line: self.caller.line(),
+                name: self.name,
             });
 
             (last.last_print_id, depth as u64, printed)
