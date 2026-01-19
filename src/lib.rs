@@ -4,7 +4,7 @@ mod logs;
 mod log_attr;
 
 pub use level::LogLevel;
-pub use spans::{Span, SpanBuilder, set_min_log_level, disable_logging};
+pub use spans::{Span, SpanBuilder, set_min_log_level, disable_logging, print_span_trace, install_panic_hook};
 pub use logs::Log;
 
 pub(crate) fn trim_src_path(path: &str) -> &str {
